@@ -53,9 +53,20 @@ the manifest format, the CLI, and the GitHub Action all changed.
 
 ### Migration
 
-Rewrite each package's manifest to the `version: 1` format (see the README and
-`examples/secrets.yaml`), move `project` into the manifest, and switch workflows
-to `command: pull` with `identity-id`. There is no automatic migration.
+Run the built-in codemod to convert v2 manifests in place:
+
+```bash
+infisicml migrate --project <slug>          # dry run — preview the v3 YAML
+infisicml migrate --project <slug> --write   # apply
+```
+
+It flattens the v2 folder tree into `{ path, keys }` blocks, preserves aliases,
+moves `output`/`fetch` under `defaults`, renames `optionalKeys` → `optional`, and
+validates the result against the v3 schema before writing. The `project` slug is
+supplied on the command line because v2 manifests didn't carry it (it lived in
+`infisicml.config` / the action inputs). The `ci` block has no v3 equivalent and
+is dropped with a warning. Finally, switch workflows to `command: pull` with
+`identity-id`.
 
 ## [2.1.0] - 2026-07-18
 

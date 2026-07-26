@@ -142,6 +142,21 @@ steps:
 
 See [`examples/`](examples) for a full manifest and workflow.
 
+## Migrating from v2
+
+v2 used a nested folder tree; v3 uses flat `{ path, keys }` blocks. A codemod
+converts manifests in place:
+
+```bash
+infisicml migrate --project <slug>           # dry run — preview the v3 YAML
+infisicml migrate --project <slug> --write    # apply
+```
+
+It flattens the tree, preserves aliases, moves `output`/`fetch` under `defaults`,
+renames `optionalKeys` → `optional`, and validates the result before writing.
+`project` is passed on the CLI because v2 manifests didn't carry it. The `ci`
+block has no v3 equivalent and is dropped with a warning.
+
 ## Manifest reference
 
 | Field | Meaning |

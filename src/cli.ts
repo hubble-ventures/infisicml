@@ -9,6 +9,7 @@ import {
   type SecretsProvider,
 } from "./core/index.js";
 import { diffAll, hasChanges } from "./commands/diff.js";
+import { migrateAll } from "./commands/migrate.js";
 import { pullToFiles } from "./commands/pull.js";
 import { hasErrors, validateAll } from "./commands/validate.js";
 
@@ -18,6 +19,7 @@ Usage:
   infisicml pull     [ids...] [--env ENV] [--profile NAME]
   infisicml validate [ids...] [--env ENV] [--against-vault] [--check-values]
   infisicml diff     [ids...] --base REF [--env ENV] [--profile NAME] [--exit-zero]
+  infisicml migrate  --project SLUG [--write]
   infisicml list
 
 Manifests are discovered as secrets.yaml files under the current directory.
@@ -40,6 +42,8 @@ async function main(): Promise<void> {
       return validate(rest);
     case "diff":
       return diff(rest);
+    case "migrate":
+      return migrate(rest);
     case "list":
       return list();
     default:
@@ -149,6 +153,48 @@ function diff(args: string[]): void {
     console.log("No secret manifest changes.");
   } else if (!values["exit-zero"]) {
     process.exitCode = 1;
+  }
+}
+
+function migrate(args: string[]): void {
+  const { values } = parseArgs({
+    args,
+    options: {
+      project: { type: "string" },
+      write: { type: "boolean", default: false },
+    },
+  });
+
+  if (!values.project) {
+    throw new Error(
+      "migrate requires --project SLUG (v2 manifests don't carry the project)"
+    );
+  }
+
+  const reports = migrateAll({
+    root: process.cwd(),
+    project: values.project,
+    write: values.write ?? false,
+  });
+
+  if (reports.length === 0) {
+    console.log("No v2 manifests found.");
+    return;
+  }
+
+  for (const report of reports) {
+    if (report.skipped) {
+      console.log(`⏭️  ${report.id}/${report.source}: already v3 — skipped`);
+      continue;
+    }
+    console.log(`\n# ${report.id}/${report.source} → secrets.yaml`);
+    for (const warning of report.warnings) console.log(`# ⚠️  ${warning}`);
+    if (report.wrote) console.log(`✅ wrote ${report.wrote}`);
+    else console.log(report.yaml);
+  }
+
+  if (!values.write) {
+    console.log("\n# Dry run — re-run with --write to apply.");
   }
 }
 
