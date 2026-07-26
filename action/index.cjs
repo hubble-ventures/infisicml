@@ -22512,6 +22512,7 @@ var import_node_path3 = require("path");
 
 // src/adapters/workspace.ts
 var import_node_child_process = require("child_process");
+var import_node_crypto2 = require("crypto");
 var import_node_fs2 = require("fs");
 var import_node_path2 = require("path");
 var MANIFEST_NAMES = ["secrets.yaml", "secrets.yml"];
@@ -22572,16 +22573,33 @@ function readManifestAtRef(ref, repoRelativePath) {
   try {
     text = (0, import_node_child_process.execFileSync)("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
+      stdio: ["ignore", "pipe", "pipe"]
     });
+  } catch (error51) {
+    const stderr = String(error51.stderr ?? "");
+    if (/does not exist in|exists on disk, but not in/i.test(stderr)) return null;
+    throw error51;
+  }
+  return parseYamlText(text);
+}
+function resolveRef2(ref) {
+  try {
+    return (0, import_node_child_process.execFileSync)(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
   } catch {
     return null;
   }
-  return parseYamlText(text);
 }
 
 // src/commands/diff.ts
 function diffAll(options) {
+  const baseSha = resolveRef2(options.base);
+  if (!baseSha) {
+    throw new Error(`Unknown base ref: ${options.base}`);
+  }
   const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
@@ -22591,7 +22609,7 @@ function diffAll(options) {
   for (const file2 of files) {
     const head = compile(loadManifest(file2), compileOpts);
     const repoRelative = (0, import_node_path3.relative)(options.root, file2.path);
-    const baseRaw = readManifestAtRef(options.base, repoRelative);
+    const baseRaw = readManifestAtRef(baseSha, repoRelative);
     const isNew = baseRaw === null;
     const base = isNew ? { ...head, bindings: [] } : compile(parseManifest(baseRaw), compileOpts);
     diffs.push({ file: file2, delta: diffCompiled(base, head), isNew });
@@ -22674,7 +22692,7 @@ async function runPull(opts) {
     total += Object.keys(values).length;
     core.info(`Loaded ${Object.keys(values).length} vars from ${file2.id}`);
   }
-  core.setOutput("packages", resolved.length);
+  core.setOutput("manifests", resolved.length);
   core.setOutput("count", total);
   core.info(`Exported ${total} secret(s) from ${resolved.length} manifest(s).`);
 }

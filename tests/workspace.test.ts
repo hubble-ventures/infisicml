@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +14,7 @@ import {
   filterManifests,
   loadManifest,
   type ManifestFile,
+  writeOutput,
 } from "../src/adapters/workspace.js";
 
 let root: string;
@@ -67,5 +75,21 @@ describe("filterManifests", () => {
 
   it("throws on an unknown id", () => {
     expect(() => filterManifests(files, ["nope"])).toThrow(/Unknown manifest id/);
+  });
+});
+
+describe("writeOutput", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "infisicml-w-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("produces a 0600 file even when overwriting a looser one", () => {
+    const path = join(dir, ".env.secrets");
+    writeFileSync(path, "old", { mode: 0o644 });
+    writeOutput(path, "SECRET=v\n");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, "utf8")).toBe("SECRET=v\n");
   });
 });

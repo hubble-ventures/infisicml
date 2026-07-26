@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative, sep } from "node:path";
 import { type Manifest, parseManifest, parseYamlText } from "../core/index.js";
 
@@ -106,19 +114,51 @@ export function readManifestAtRef(
   try {
     text = execFileSync("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-  } catch {
-    // The file didn't exist at that ref (or the ref is unknown) — treat as
-    // absent. A malformed YAML at the ref must NOT be masked as "absent", so
-    // parse outside this catch and let a parse error propagate.
-    return null;
+  } catch (error) {
+    // Return null ONLY when git proves the path is absent at this (already
+    // resolved) commit — a genuinely new manifest. Any other git failure (I/O,
+    // permissions, a corrupt repo) must propagate, not be misread as "absent".
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+    if (/does not exist in|exists on disk, but not in/i.test(stderr)) return null;
+    throw error;
   }
+  // Parse outside the catch so a malformed YAML at the ref surfaces as an error
+  // rather than being masked as "absent".
   return parseYamlText(text);
 }
 
-// Secret output files are written owner-only (0600) — they hold vault values.
-// The mode applies on creation; an existing file keeps its permissions.
+/**
+ * Resolve `ref` to a fixed commit SHA, or `null` if it doesn't resolve. Diffing
+ * pins the base to this SHA once so every manifest is read from the same tree,
+ * even if the branch moves mid-run.
+ */
+export function resolveRef(ref: string): string | null {
+  try {
+    return execFileSync(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write a secret output file atomically and owner-only. Content goes to a fresh
+ * temp file created at 0600, then renamed over the destination — so the secret
+ * is never momentarily visible at a looser mode (which a plain overwrite +
+ * chmod would allow), and a partial write never replaces a good file.
+ */
 export function writeOutput(path: string, content: string): void {
-  writeFileSync(path, content, { mode: 0o600 });
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, content, { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
 }

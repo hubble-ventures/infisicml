@@ -13,6 +13,7 @@ import {
   loadManifest,
   type ManifestFile,
   readManifestAtRef,
+  resolveRef,
 } from "../adapters/workspace.js";
 
 export type DiffOptions = {
@@ -40,6 +41,13 @@ export type ManifestDiff = {
  * covers additions and modifications, the security-relevant PR review surface.
  */
 export function diffAll(options: DiffOptions): ManifestDiff[] {
+  // Resolve the base to a fixed commit once: rejects a bad `--base` up front
+  // (otherwise every read fails and each manifest looks newly added), and pins
+  // all reads to one tree even if the branch moves mid-run.
+  const baseSha = resolveRef(options.base);
+  if (!baseSha) {
+    throw new Error(`Unknown base ref: ${options.base}`);
+  }
   const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
@@ -51,7 +59,7 @@ export function diffAll(options: DiffOptions): ManifestDiff[] {
     const head = compile(loadManifest(file), compileOpts);
 
     const repoRelative = relative(options.root, file.path);
-    const baseRaw = readManifestAtRef(options.base, repoRelative);
+    const baseRaw = readManifestAtRef(baseSha, repoRelative);
     const isNew = baseRaw === null;
     // A manifest absent at the base has the same settings as head but no
     // bindings, so its whole surface renders as added (no phantom settings diff).

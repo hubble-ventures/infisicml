@@ -62,9 +62,11 @@ export function migrateAll(options: MigrateOptions): MigrationReport[] {
 
       const report: MigrationReport = { id: file.id, source: file.source, yaml, warnings };
       if (basename(file.source) !== "secrets.yaml") {
+        // Tense matches the mode — nothing is written in a dry run.
+        const verb = options.write ? "Wrote" : "Will write";
         report.warnings = [
           ...warnings,
-          `Wrote secrets.yaml; the old ${file.source} is now stale — remove it.`,
+          `${verb} secrets.yaml; remove the stale ${file.source} after applying.`,
         ];
       }
       if (options.write) {
