@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { InfisicalProvider } from "./adapters/infisical.js";
-import {
-  discoverManifests,
-  writeOutput,
-} from "./adapters/workspace.js";
+import { discoverManifests } from "./adapters/workspace.js";
 import {
   isEmptyDelta,
   ManifestError,
   renderDeltaText,
-  resolveOutputPath,
-  serializeDotenv,
   type SecretsProvider,
 } from "./core/index.js";
 import { diffAll, hasChanges } from "./commands/diff.js";
-import { resolveAll } from "./commands/resolve.js";
+import { pullToFiles } from "./commands/pull.js";
 import { hasErrors, validateAll } from "./commands/validate.js";
 
 const USAGE = `infisicml — declarative Infisical secret manifests
@@ -63,21 +58,16 @@ async function pull(args: string[]): Promise<void> {
     },
   });
 
-  const root = process.cwd();
-  const resolved = await resolveAll({
-    root,
+  const outcomes = await pullToFiles({
+    root: process.cwd(),
     environment: values.env,
     profile: values.profile,
     provider: tokenProvider(),
     ids: positionals,
   });
 
-  for (const { file, compiled, values: secrets } of resolved) {
-    const outputPath = resolveOutputPath(file.dir, compiled.output);
-    writeOutput(outputPath, renderEnvFile(file.id, compiled.environment, secrets));
-    console.log(
-      `✅ ${file.id}: wrote ${compiled.output} (${Object.keys(secrets).length} vars)`
-    );
+  for (const outcome of outcomes) {
+    console.log(`✅ ${outcome.id}: wrote ${outcome.output} (${outcome.count} vars)`);
   }
 }
 
@@ -179,20 +169,6 @@ function tokenProvider(): SecretsProvider {
     );
   }
   return new InfisicalProvider(token);
-}
-
-function renderEnvFile(
-  id: string,
-  environment: string,
-  secrets: Record<string, string>
-): string {
-  const header = [
-    "# Pulled from Infisical — do not edit. Refresh: infisicml pull",
-    `# Package: ${id}`,
-    `# Environment: ${environment}`,
-    "",
-  ].join("\n");
-  return header + serializeDotenv(secrets);
 }
 
 main().catch((error) => {
