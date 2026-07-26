@@ -1,26 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { parseDotenv, serializeDotenv } from "../src/dotenv.js";
+import { serializeDotenv } from "../src/core/index.js";
 
-describe("dotenv", () => {
-  it("parses simple key=value pairs", () => {
-    expect(parseDotenv("FOO=bar\nBAZ=qux")).toEqual({ FOO: "bar", BAZ: "qux" });
+describe("serializeDotenv", () => {
+  it("writes bare values that are safe", () => {
+    expect(serializeDotenv({ A: "simple-value_1" })).toBe("A=simple-value_1\n");
   });
 
-  it("skips comments and blank lines", () => {
-    expect(parseDotenv("# comment\n\nKEY=value")).toEqual({ KEY: "value" });
+  it("quotes and escapes values with special characters", () => {
+    expect(serializeDotenv({ A: 'a "b" c' })).toBe('A="a \\"b\\" c"\n');
+    expect(serializeDotenv({ A: "line1\nline2" })).toBe('A="line1\\nline2"\n');
   });
 
-  it("parses quoted values", () => {
-    expect(parseDotenv('KEY="hello world"')).toEqual({ KEY: "hello world" });
+  it("quotes empty values", () => {
+    expect(serializeDotenv({ A: "" })).toBe('A=""\n');
   });
 
-  it("serializes values needing quotes", () => {
-    const out = serializeDotenv({ KEY: "hello world" });
-    expect(out).toBe('KEY="hello world"\n');
-  });
-
-  it("round-trips simple values", () => {
-    const original = { A: "1", B: "two" };
-    expect(parseDotenv(serializeDotenv(original))).toEqual(original);
+  it("returns empty string for no vars", () => {
+    expect(serializeDotenv({})).toBe("");
   });
 });

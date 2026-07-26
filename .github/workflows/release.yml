@@ -113,31 +113,31 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
+          cache: pnpm
 
-      # Trusted publishing + provenance require npm >= 11.5.1 (newer than the
-      # npm bundled with Node 20).
+      # Trusted publishing + provenance require npm >= 11.5.1.
       - name: Upgrade npm (trusted publishing support)
         # Floor at the first npm with trusted publishing; auto-upgrade within v11,
         # but don't let an unvetted npm v12+ silently change the publish toolchain.
         run: npm install -g npm@^11.5.1
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
-      - run: npm run type-check
-      - run: npm run build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
 
-      - name: Verify committed dist is up to date
+      - name: Verify committed action bundle + schema are up to date
         run: |
-          if ! git diff --exit-code -- dist; then
-            echo "::error::dist/ is stale — run 'npm run build' and commit the result"
+          if ! git diff --exit-code -- action/index.cjs schema; then
+            echo "::error::action/index.cjs or schema/ is stale — run 'pnpm build' and commit the result"
             exit 1
           fi
-
-      - run: npm test
 
       # Create the release tag now that build + tests have passed (a main-push
       # release). A manually-pushed tag already exists, so this is a no-op there.

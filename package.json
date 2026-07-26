@@ -1,7 +1,7 @@
 {
   "name": "@hubble-ventures/infisicml",
-  "version": "2.1.0",
-  "description": "Infisical Secret Orchestration — federated per-package secret manifests for monorepos, unified across local dev and CI.",
+  "version": "3.0.0",
+  "description": "Declarative Infisical secret manifests for monorepos — pull, validate, and diff per-package secrets, with native GitHub Actions support.",
   "keywords": [
     "infisical",
     "secrets",
@@ -9,6 +9,7 @@
     "dotenv",
     "github-actions",
     "ci",
+    "manifest",
     "env"
   ],
   "license": "MIT",
@@ -39,31 +40,41 @@
   },
   "files": [
     "dist",
+    "action",
     "schema",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist",
+    "gen:schema": "tsx scripts/gen-schema.ts",
+    "prebuild": "pnpm gen:schema",
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist action/index.cjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "npm run build && bash scripts/smoke.sh",
-    "type-check": "tsc --noEmit",
-    "release": "npm version --no-git-tag-version",
-    "version": "npm run build"
+    "smoke": "pnpm build && node scripts/smoke.mjs",
+    "check": "pnpm gen:schema && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "yaml": "^2.9.0",
-    "zod": "^3.23.8"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

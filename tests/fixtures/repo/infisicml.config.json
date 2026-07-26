@@ -1,9 +1,0 @@
-{
-  "projectId": "fixture-project-id",
-  "discovery": {
-    "roots": ["apps"],
-    "packages": [{ "id": "postgres", "dir": "infra/postgres" }]
-  },
-  "auth": { "oidcAudience": "https://example.com/org" },
-  "hooks": { "advertiseKeys": [{ "envVar": "INFISICML_FLY_KEYS", "scope": "runtime" }] }
-}

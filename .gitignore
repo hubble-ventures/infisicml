@@ -4,3 +4,7 @@ node_modules/
 .env
 .env.secrets
 coverage/
+
+# Built at publish time (npm `files` ships it). The GitHub Action bundle
+# (action/index.cjs) and the generated JSON schema ARE committed.
+dist/

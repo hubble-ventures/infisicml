@@ -1,48 +1,68 @@
-name: Load Infisical secrets (infisicml)
+name: infisicml
 description: >-
-  Fetch secrets from Infisical into the job environment via infisicml export-gha.
-  Authentication is GitHub OIDC only — the calling job MUST set
-  `permissions: id-token: write`.
+  Pull, validate, or diff Infisical secret manifests. Authentication is GitHub
+  OIDC — the calling job MUST set `permissions: id-token: write` for commands
+  that read the vault (pull, validate --against-vault).
 
 inputs:
-  package-id:
-    description: 'Package id from the infisicml registry (e.g. app, api)'
+  command:
+    description: 'What to do: pull | validate | diff'
     required: true
   environment:
-    description: 'Infisical environment slug (development, preview, production)'
-    required: true
+    description: 'Infisical environment slug (development, staging, production)'
+    required: false
+    default: ''
   profile:
-    description: 'Optional manifest profile (e.g. deploy, release)'
+    description: 'Optional manifest profile whose secrets replace the root ones'
     required: false
     default: ''
-  project-slug:
-    description: 'Infisical project slug'
-    required: true
+  ids:
+    description: 'Restrict to these manifest ids (space/comma separated). Default: all discovered.'
+    required: false
+    default: ''
   identity-id:
-    description: 'Infisical machine-identity id bound to a GitHub OIDC auth method'
-    required: true
-  oidc-audience:
-    description: 'OIDC audience (must match the identity bound audiences). Overrides infisicml.config auth.oidcAudience.'
+    description: 'Infisical machine-identity id bound to a GitHub OIDC auth method (required for pull / --against-vault)'
     required: false
     default: ''
-  infisicml-version:
-    description: 'Version of the infisicml npm package to run via npx'
+  oidc-audience:
+    description: 'OIDC audience the identity expects (optional)'
     required: false
-    default: 'latest'
+    default: ''
+  base:
+    description: 'diff only: git ref to compare against (e.g. the PR base branch)'
+    required: false
+    default: ''
+  against-vault:
+    description: 'validate only: also check declared keys exist in the vault'
+    required: false
+    default: 'false'
+  check-values:
+    description: 'validate only: also flag present-but-empty required keys (implies a value read)'
+    required: false
+    default: 'false'
+  comment:
+    description: 'diff only: upsert a sticky PR comment with the manifest delta'
+    required: false
+    default: 'false'
+  fail-on-change:
+    description: 'diff only: fail the step when the manifest surface changed'
+    required: false
+    default: 'false'
+  github-token:
+    description: 'Token used to post the PR comment (usually ${{ github.token }})'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  changed:
+    description: 'diff: whether any manifest changed'
+  added:
+    description: 'diff: total added variables'
+  removed:
+    description: 'diff: total removed variables'
+  count:
+    description: 'pull: total exported variables'
 
 runs:
-  using: composite
-  steps:
-    - name: Load secrets into GITHUB_ENV (OIDC)
-      shell: bash
-      env:
-        INFISICAL_PROJECT_SLUG: ${{ inputs.project-slug }}
-        INFISICAL_IDENTITY_ID: ${{ inputs.identity-id }}
-        INFISICAL_OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
-        INFISICAL_ENV_SLUG: ${{ inputs.environment }}
-      run: |
-        args=(export-gha "${{ inputs.package-id }}" --env "${{ inputs.environment }}")
-        if [ -n "${{ inputs.profile }}" ]; then
-          args+=(--profile "${{ inputs.profile }}")
-        fi
-        npx --yes "@hubble-ventures/infisicml@${{ inputs.infisicml-version }}" "${args[@]}"
+  using: node24
+  main: index.cjs

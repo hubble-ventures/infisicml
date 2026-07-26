@@ -1,0 +1,34 @@
+# Validate manifests and post the secret-surface diff on every PR.
+# Tier-1 validate needs no credentials; the diff is declaration-only (never
+# reads secret values), so this whole workflow is safe on untrusted PR branches.
+name: secrets
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write # post the diff comment
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the base ref for diff
+
+      - name: Validate manifests (schema + structure)
+        uses: hubble-ventures/infisicml/action@v3
+        with:
+          command: validate
+
+      - name: Diff secret surface vs base
+        uses: hubble-ventures/infisicml/action@v3
+        with:
+          command: diff
+          base: ${{ github.event.pull_request.base.ref }}
+          comment: true
+          # Fail the check when the secret surface changes, forcing a review.
+          # Drop this if you only want the informational comment.
+          fail-on-change: true

@@ -1,166 +1,205 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { runExportGha } from "./commands/export-gha.js";
-import { runList } from "./commands/list.js";
-import { runPaths } from "./commands/paths.js";
-import { runPull } from "./commands/pull.js";
-import { runExec } from "./commands/run.js";
-import { runValidate } from "./commands/validate.js";
+import { InfisicalProvider } from "./adapters/infisical.js";
+import {
+  discoverManifests,
+  writeOutput,
+} from "./adapters/workspace.js";
+import {
+  isEmptyDelta,
+  ManifestError,
+  renderDeltaText,
+  resolveOutputPath,
+  serializeDotenv,
+  type SecretsProvider,
+} from "./core/index.js";
+import { diffAll, hasChanges } from "./commands/diff.js";
+import { resolveAll } from "./commands/resolve.js";
+import { hasErrors, validateAll } from "./commands/validate.js";
 
-const USAGE = `infisicml — Infisical Secret Orchestration for monorepos
+const USAGE = `infisicml — declarative Infisical secret manifests
 
 Usage:
-  infisicml pull [ids...] [--env ENV] [--profile NAME] [--force] [--here] [--turbo]
-  infisicml export-gha <id> [--env ENV] [--profile NAME]
+  infisicml pull     [ids...] [--env ENV] [--profile NAME]
+  infisicml validate [ids...] [--env ENV] [--against-vault] [--check-values]
+  infisicml diff     [ids...] --base REF [--env ENV] [--profile NAME] [--exit-zero]
   infisicml list
-  infisicml validate
-  infisicml paths <id> [--profile NAME] [--comma]
-  infisicml run <id> [--profile NAME] [--env ENV] -- <command...>
 
-Config: infisicml.config.{ts,json} at the repo root. See https://github.com/hubble-ventures/infisicml
+Manifests are discovered as secrets.yaml files under the current directory.
+Local auth: set INFISICAL_TOKEN (and optionally INFISICAL_API_URL).
+Docs: https://github.com/hubble-ventures/infisicml
 `;
 
 async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
-  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-    console.log(USAGE);
-    process.exit(0);
+  const [subcommand, ...rest] = process.argv.slice(2);
+
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    process.stdout.write(USAGE);
+    return;
   }
 
-  const subcommand = argv[0];
-  const rest = argv.slice(1);
-
-  try {
-    switch (subcommand) {
-      case "pull":
-        await handlePull(rest);
-        break;
-      case "export-gha":
-        await handleExportGha(rest);
-        break;
-      case "list":
-        await runList();
-        break;
-      case "validate":
-        await runValidate();
-        break;
-      case "paths":
-        await handlePaths(rest);
-        break;
-      case "run":
-        await handleRun(rest);
-        break;
-      default:
-        console.error(`Unknown subcommand: ${subcommand}\n`);
-        console.log(USAGE);
-        process.exit(1);
-    }
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
+  switch (subcommand) {
+    case "pull":
+      return pull(rest);
+    case "validate":
+      return validate(rest);
+    case "diff":
+      return diff(rest);
+    case "list":
+      return list();
+    default:
+      process.stderr.write(`Unknown subcommand: ${subcommand}\n\n${USAGE}`);
+      process.exitCode = 1;
   }
 }
 
-async function handlePull(args: string[]): Promise<void> {
+async function pull(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: {
-      env: { type: "string", default: "development" },
+      env: { type: "string" },
       profile: { type: "string" },
-      force: { type: "boolean", short: "f", default: false },
-      here: { type: "boolean", default: false },
-      turbo: { type: "boolean", default: false },
     },
   });
 
-  await runPull({
+  const root = process.cwd();
+  const resolved = await resolveAll({
+    root,
+    environment: values.env,
+    profile: values.profile,
+    provider: tokenProvider(),
     ids: positionals,
-    env: values.env ?? "development",
-    profile: values.profile,
-    force: values.force ?? false,
-    here: values.here ?? false,
-    turbo: values.turbo ?? false,
   });
+
+  for (const { file, compiled, values: secrets } of resolved) {
+    const outputPath = resolveOutputPath(file.dir, compiled.output);
+    writeOutput(outputPath, renderEnvFile(file.id, compiled.environment, secrets));
+    console.log(
+      `✅ ${file.id}: wrote ${compiled.output} (${Object.keys(secrets).length} vars)`
+    );
+  }
 }
 
-async function handleExportGha(args: string[]): Promise<void> {
+async function validate(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: {
-      env: { type: "string", default: "production" },
-      profile: { type: "string" },
+      env: { type: "string" },
+      "against-vault": { type: "boolean", default: false },
+      "check-values": { type: "boolean", default: false },
     },
   });
 
-  const packageId = positionals[0];
-  if (!packageId) {
-    throw new Error("export-gha requires a package id");
+  const provider =
+    values["against-vault"] || values["check-values"]
+      ? tokenProvider()
+      : undefined;
+
+  const results = await validateAll({
+    root: process.cwd(),
+    environment: values.env,
+    provider,
+    checkValues: values["check-values"],
+    ids: positionals,
+  });
+
+  for (const { file, issues } of results) {
+    if (issues.length === 0) {
+      console.log(`✅ ${file.id}: valid`);
+      continue;
+    }
+    const errors = issues.filter((i) => i.level === "error").length;
+    console.log(`${errors > 0 ? "❌" : "⚠️ "} ${file.id}:`);
+    for (const issue of issues) {
+      const at = [issue.path, issue.key].filter(Boolean).join(":");
+      console.log(
+        `   ${issue.level === "error" ? "error" : "warn "} ${at ? `${at} — ` : ""}${issue.message}`
+      );
+    }
   }
 
-  await runExportGha({
-    packageId,
-    env: values.env ?? "production",
-    profile: values.profile,
-  });
+  if (hasErrors(results)) {
+    process.exitCode = 1;
+  } else {
+    console.log(`\n${results.length} manifest(s) checked.`);
+  }
 }
 
-async function handlePaths(args: string[]): Promise<void> {
+function diff(args: string[]): void {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: {
+      base: { type: "string" },
+      env: { type: "string" },
       profile: { type: "string" },
-      comma: { type: "boolean", default: false },
+      "exit-zero": { type: "boolean", default: false },
     },
   });
 
-  const packageId = positionals[0];
-  if (!packageId) {
-    throw new Error("paths requires a package id");
+  if (!values.base) throw new Error("diff requires --base REF");
+
+  const diffs = diffAll({
+    root: process.cwd(),
+    base: values.base,
+    environment: values.env,
+    profile: values.profile,
+    ids: positionals,
+  });
+
+  for (const { file, delta, isNew } of diffs) {
+    if (isEmptyDelta(delta)) continue;
+    console.log(`\n${file.id}${isNew ? " (new)" : ""}`);
+    console.log(renderDeltaText(delta));
   }
 
-  await runPaths({
-    packageId,
-    profile: values.profile,
-    comma: values.comma ?? false,
-  });
+  if (!hasChanges(diffs)) {
+    console.log("No secret manifest changes.");
+  } else if (!values["exit-zero"]) {
+    process.exitCode = 1;
+  }
 }
 
-async function handleRun(args: string[]): Promise<void> {
-  const sep = args.indexOf("--");
-  if (sep === -1) {
-    throw new Error("run requires -- before command");
+function list(): void {
+  const files = discoverManifests(process.cwd());
+  if (files.length === 0) {
+    console.log("No secrets.yaml manifests found.");
+    return;
   }
-
-  const before = args.slice(0, sep);
-  const command = args.slice(sep + 1);
-  if (command.length === 0) {
-    throw new Error("run requires a command after --");
-  }
-
-  const { values, positionals } = parseArgs({
-    args: before,
-    allowPositionals: true,
-    options: {
-      env: { type: "string", default: "development" },
-      profile: { type: "string" },
-    },
-  });
-
-  const packageId = positionals[0];
-  if (!packageId) {
-    throw new Error("run requires a package id");
-  }
-
-  const code = await runExec({
-    packageId,
-    profile: values.profile,
-    env: values.env ?? "development",
-    command,
-  });
-  process.exit(code);
+  for (const file of files) console.log(`${file.id}\t${file.filename}`);
 }
 
-main();
+function tokenProvider(): SecretsProvider {
+  const token = process.env.INFISICAL_TOKEN;
+  if (!token) {
+    throw new Error(
+      "INFISICAL_TOKEN is not set — required to read from the vault locally."
+    );
+  }
+  return new InfisicalProvider(token);
+}
+
+function renderEnvFile(
+  id: string,
+  environment: string,
+  secrets: Record<string, string>
+): string {
+  const header = [
+    "# Pulled from Infisical — do not edit. Refresh: infisicml pull",
+    `# Package: ${id}`,
+    `# Environment: ${environment}`,
+    "",
+  ].join("\n");
+  return header + serializeDotenv(secrets);
+}
+
+main().catch((error) => {
+  if (error instanceof ManifestError) {
+    for (const issue of error.issues) console.error(`error: ${issue.message}`);
+  } else {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+  process.exitCode = 1;
+});
