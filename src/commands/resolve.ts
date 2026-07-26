@@ -6,6 +6,7 @@ import {
 } from "../core/index.js";
 import {
   discoverManifests,
+  filterManifests,
   loadManifest,
   type ManifestFile,
 } from "../adapters/workspace.js";
@@ -48,13 +49,5 @@ export async function resolveAll(
 }
 
 export function selectManifests(root: string, ids?: string[]): ManifestFile[] {
-  const all = discoverManifests(root);
-  if (!ids || ids.length === 0) return all;
-  const wanted = new Set(ids);
-  const picked = all.filter((f) => wanted.has(f.id));
-  const missing = ids.filter((id) => !all.some((f) => f.id === id));
-  if (missing.length > 0) {
-    throw new Error(`Unknown manifest id(s): ${missing.join(", ")}`);
-  }
-  return picked;
+  return filterManifests(discoverManifests(root), ids);
 }

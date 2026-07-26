@@ -9,6 +9,7 @@ import {
 } from "../core/index.js";
 import {
   discoverManifests,
+  filterManifests,
   loadManifest,
   type ManifestFile,
   readManifestAtRef,
@@ -39,7 +40,7 @@ export type ManifestDiff = {
  * covers additions and modifications, the security-relevant PR review surface.
  */
 export function diffAll(options: DiffOptions): ManifestDiff[] {
-  const files = filterIds(discoverManifests(options.root), options.ids);
+  const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
     profile: options.profile,
@@ -65,10 +66,4 @@ export function diffAll(options: DiffOptions): ManifestDiff[] {
 
 export function hasChanges(diffs: ManifestDiff[]): boolean {
   return diffs.some((d) => !isEmptyDelta(d.delta));
-}
-
-function filterIds(files: ManifestFile[], ids?: string[]): ManifestFile[] {
-  if (!ids || ids.length === 0) return files;
-  const wanted = new Set(ids);
-  return files.filter((f) => wanted.has(f.id));
 }

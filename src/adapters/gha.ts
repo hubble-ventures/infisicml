@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 
+// Bound GitHub/OIDC requests so a hang can't stall the job for minutes.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 // A tiny, dependency-free implementation of the handful of GitHub Actions
 // toolkit primitives this action uses. Each is a documented "workflow command"
 // (a line on stdout) or a file-command (append to a path named by an env var) —
@@ -66,6 +69,7 @@ export async function getOidcToken(audience?: string): Promise<string> {
   if (audience) url.searchParams.set("audience", audience);
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${requestToken}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`OIDC token request failed (${res.status})`);
@@ -134,7 +138,10 @@ export async function upsertPrComment(
 }
 
 async function gh(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(
       `GitHub API ${init.method ?? "GET"} ${url} failed (${res.status}): ${await res.text()}`

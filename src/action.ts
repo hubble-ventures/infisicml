@@ -32,7 +32,7 @@ async function run(): Promise<void> {
     case "pull":
       return runPull({ root, environment, profile, ids });
     case "validate":
-      return runValidate({ root, environment, ids });
+      return runValidate({ root, environment, profile, ids });
     case "diff":
       return runDiff({ root, environment, profile, ids });
     default:
@@ -71,6 +71,7 @@ async function runValidate(opts: Common): Promise<void> {
   const results = await validateAll({
     root: opts.root,
     environment: opts.environment,
+    profile: opts.profile,
     ids: opts.ids,
     provider,
     checkValues,
@@ -128,8 +129,19 @@ async function runDiff(opts: Common): Promise<void> {
 
   if (comment) {
     const token = core.getInput("github-token");
-    if (token) await upsertPrComment(token, markdown);
-    else core.warning("comment: true but no github-token provided — skipping PR comment.");
+    if (!token) {
+      core.warning("comment: true but no github-token provided — skipping PR comment.");
+    } else {
+      // A comment failure (e.g. missing pull-requests: write on a fork PR) must
+      // not fail the diff itself — the summary and outputs are already set.
+      try {
+        await upsertPrComment(token, markdown);
+      } catch (error) {
+        core.warning(
+          `Failed to post PR comment: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
   }
 
   if (changed && failOnChange) {

@@ -2,6 +2,10 @@ import type { SecretsProvider } from "../core/types.js";
 
 const DEFAULT_API_URL = "https://app.infisical.com";
 
+// Bound every request so a hung vault can't stall a CI job up to undici's
+// 300s default; the caller (or the job timeout) handles a genuine outage.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /** Resolve the Infisical API base URL (env override → cloud default). */
 export function resolveApiUrl(): string {
   return process.env.INFISICAL_API_URL ?? DEFAULT_API_URL;
@@ -35,6 +39,7 @@ export class InfisicalProvider implements SecretsProvider {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ identityId, jwt }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       throw new Error(
@@ -75,7 +80,10 @@ export class InfisicalProvider implements SecretsProvider {
     await Promise.all(
       keys.map(async (key) => {
         const url = this.secretUrl(project, environment, path, key);
-        const res = await fetch(url, { headers: this.authHeaders() });
+        const res = await fetch(url, {
+          headers: this.authHeaders(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
         if (res.status === 404) return;
         if (!res.ok) {
           throw new Error(
@@ -98,7 +106,10 @@ export class InfisicalProvider implements SecretsProvider {
     url.searchParams.set("workspaceSlug", project);
     url.searchParams.set("environment", environment);
     url.searchParams.set("secretPath", path);
-    const res = await fetch(url, { headers: this.authHeaders() });
+    const res = await fetch(url, {
+      headers: this.authHeaders(),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) {
       throw new Error(
         `Infisical read failed for ${path} (${res.status}): ${await res.text()}`

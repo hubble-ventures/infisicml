@@ -7358,6 +7358,7 @@ var require_dist = __commonJS({
 
 // src/adapters/infisical.ts
 var DEFAULT_API_URL = "https://app.infisical.com";
+var REQUEST_TIMEOUT_MS = 3e4;
 function resolveApiUrl() {
   return process.env.INFISICAL_API_URL ?? DEFAULT_API_URL;
 }
@@ -7376,7 +7377,8 @@ var InfisicalProvider = class _InfisicalProvider {
     const res = await fetch(`${baseUrl}/api/v1/auth/oidc-auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ identityId, jwt: jwt2 })
+      body: JSON.stringify({ identityId, jwt: jwt2 }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
     if (!res.ok) {
       throw new Error(
@@ -7401,7 +7403,10 @@ var InfisicalProvider = class _InfisicalProvider {
     await Promise.all(
       keys.map(async (key) => {
         const url2 = this.secretUrl(project, environment, path, key);
-        const res = await fetch(url2, { headers: this.authHeaders() });
+        const res = await fetch(url2, {
+          headers: this.authHeaders(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        });
         if (res.status === 404) return;
         if (!res.ok) {
           throw new Error(
@@ -7419,7 +7424,10 @@ var InfisicalProvider = class _InfisicalProvider {
     url2.searchParams.set("workspaceSlug", project);
     url2.searchParams.set("environment", environment);
     url2.searchParams.set("secretPath", path);
-    const res = await fetch(url2, { headers: this.authHeaders() });
+    const res = await fetch(url2, {
+      headers: this.authHeaders(),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
     if (!res.ok) {
       throw new Error(
         `Infisical read failed for ${path} (${res.status}): ${await res.text()}`
@@ -7447,6 +7455,7 @@ var InfisicalProvider = class _InfisicalProvider {
 // src/adapters/gha.ts
 var import_node_crypto = require("crypto");
 var import_node_fs = require("fs");
+var REQUEST_TIMEOUT_MS2 = 3e4;
 var core = {
   getInput(name, opts) {
     const raw = process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`];
@@ -7497,7 +7506,8 @@ async function getOidcToken(audience) {
   const url2 = new URL(requestUrl);
   if (audience) url2.searchParams.set("audience", audience);
   const res = await fetch(url2, {
-    headers: { authorization: `Bearer ${requestToken}` }
+    headers: { authorization: `Bearer ${requestToken}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2)
   });
   if (!res.ok) {
     throw new Error(`OIDC token request failed (${res.status})`);
@@ -7552,7 +7562,10 @@ ${markdown}`;
   }
 }
 async function gh(url2, init) {
-  const res = await fetch(url2, init);
+  const res = await fetch(url2, {
+    ...init,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2)
+  });
   if (!res.ok) {
     throw new Error(
       `GitHub API ${init.method ?? "GET"} ${url2} failed (${res.status}): ${await res.text()}`
@@ -7637,9 +7650,9 @@ function compile(manifest, options = {}) {
 }
 function readEntry(entry) {
   if (typeof entry === "string") return { sourceKey: entry, targetVar: entry };
-  const pair = Object.entries(entry)[0];
-  if (!pair) throw new ManifestError([aliasError()]);
-  const [sourceKey, targetVar] = pair;
+  const pairs = Object.entries(entry);
+  if (pairs.length !== 1) throw new ManifestError([aliasError()]);
+  const [sourceKey, targetVar] = pairs[0];
   return { sourceKey, targetVar };
 }
 function selectBlocks(manifest, profile) {
@@ -22539,6 +22552,15 @@ function walk(root, dir, out) {
     }
   }
 }
+function filterManifests(files, ids) {
+  if (!ids || ids.length === 0) return files;
+  const missing = ids.filter((id) => !files.some((f) => f.id === id));
+  if (missing.length > 0) {
+    throw new Error(`Unknown manifest id(s): ${missing.join(", ")}`);
+  }
+  const wanted = new Set(ids);
+  return files.filter((f) => wanted.has(f.id));
+}
 function readManifestRaw(file2) {
   return parseYamlText((0, import_node_fs2.readFileSync)(file2.path, "utf8"));
 }
@@ -22546,20 +22568,21 @@ function loadManifest(file2) {
   return parseManifest(readManifestRaw(file2));
 }
 function readManifestAtRef(ref, repoRelativePath) {
+  let text;
   try {
-    const text = (0, import_node_child_process.execFileSync)("git", ["show", `${ref}:${repoRelativePath}`], {
+    text = (0, import_node_child_process.execFileSync)("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"]
     });
-    return parseYamlText(text);
   } catch {
     return null;
   }
+  return parseYamlText(text);
 }
 
 // src/commands/diff.ts
 function diffAll(options) {
-  const files = filterIds(discoverManifests(options.root), options.ids);
+  const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
     profile: options.profile
@@ -22578,11 +22601,6 @@ function diffAll(options) {
 function hasChanges(diffs) {
   return diffs.some((d) => !isEmptyDelta(d.delta));
 }
-function filterIds(files, ids) {
-  if (!ids || ids.length === 0) return files;
-  const wanted = new Set(ids);
-  return files.filter((f) => wanted.has(f.id));
-}
 
 // src/commands/resolve.ts
 async function resolveAll(options) {
@@ -22600,27 +22618,20 @@ async function resolveAll(options) {
   return resolved;
 }
 function selectManifests(root, ids) {
-  const all = discoverManifests(root);
-  if (!ids || ids.length === 0) return all;
-  const wanted = new Set(ids);
-  const picked = all.filter((f) => wanted.has(f.id));
-  const missing = ids.filter((id) => !all.some((f) => f.id === id));
-  if (missing.length > 0) {
-    throw new Error(`Unknown manifest id(s): ${missing.join(", ")}`);
-  }
-  return picked;
+  return filterManifests(discoverManifests(root), ids);
 }
 
 // src/commands/validate.ts
 async function validateAll(options) {
-  const files = filterIds2(discoverManifests(options.root), options.ids);
+  const files = filterManifests(discoverManifests(options.root), options.ids);
   const results = [];
   for (const file2 of files) {
     const raw = readManifestRaw(file2);
     const issues = validateStructure(raw);
     if (issues.length === 0 && options.provider) {
       const compiled = compile(loadManifest(file2), {
-        environment: options.environment
+        environment: options.environment,
+        profile: options.profile
       });
       issues.push(
         ...await validateAgainstVault(compiled, options.provider, {
@@ -22635,11 +22646,6 @@ async function validateAll(options) {
 function hasErrors(results) {
   return results.some((r) => r.issues.some((i) => i.level === "error"));
 }
-function filterIds2(files, ids) {
-  if (!ids || ids.length === 0) return files;
-  const wanted = new Set(ids);
-  return files.filter((f) => wanted.has(f.id));
-}
 
 // src/action.ts
 async function run() {
@@ -22652,7 +22658,7 @@ async function run() {
     case "pull":
       return runPull({ root, environment, profile, ids });
     case "validate":
-      return runValidate({ root, environment, ids });
+      return runValidate({ root, environment, profile, ids });
     case "diff":
       return runDiff({ root, environment, profile, ids });
     default:
@@ -22679,6 +22685,7 @@ async function runValidate(opts) {
   const results = await validateAll({
     root: opts.root,
     environment: opts.environment,
+    profile: opts.profile,
     ids: opts.ids,
     provider,
     checkValues
@@ -22727,8 +22734,17 @@ _No changes._`;
   core.setOutput("changed-count", count(diffs, (d) => d.changed.length));
   if (comment) {
     const token = core.getInput("github-token");
-    if (token) await upsertPrComment(token, markdown);
-    else core.warning("comment: true but no github-token provided \u2014 skipping PR comment.");
+    if (!token) {
+      core.warning("comment: true but no github-token provided \u2014 skipping PR comment.");
+    } else {
+      try {
+        await upsertPrComment(token, markdown);
+      } catch (error51) {
+        core.warning(
+          `Failed to post PR comment: ${error51 instanceof Error ? error51.message : String(error51)}`
+        );
+      }
+    }
   }
   if (changed && failOnChange) {
     core.setFailed("Secret manifest changed \u2014 review required.");

@@ -21,7 +21,7 @@ inputs:
     required: false
     default: ''
   identity-id:
-    description: 'Infisical machine-identity id bound to a GitHub OIDC auth method (required for pull / --against-vault)'
+    description: 'Infisical machine-identity id bound to a GitHub OIDC auth method (required for pull, --against-vault, or --check-values)'
     required: false
     default: ''
   oidc-audience:
@@ -41,7 +41,7 @@ inputs:
     required: false
     default: 'false'
   comment:
-    description: 'diff only: upsert a sticky PR comment with the manifest delta'
+    description: 'diff only: upsert a sticky PR comment with the manifest delta (needs pull-requests: write; the default GITHUB_TOKEN lacks it on fork PRs)'
     required: false
     default: 'false'
   fail-on-change:
@@ -49,7 +49,7 @@ inputs:
     required: false
     default: 'false'
   github-token:
-    description: 'Token used to post the PR comment (usually ${{ github.token }})'
+    description: 'Token used to post the PR comment — must have pull-requests/issues write (usually ${{ github.token }} with permissions: pull-requests: write)'
     required: false
     default: ${{ github.token }}
 
@@ -60,8 +60,12 @@ outputs:
     description: 'diff: total added variables'
   removed:
     description: 'diff: total removed variables'
+  changed-count:
+    description: 'diff: total variables whose source changed'
   count:
     description: 'pull: total exported variables'
+  packages:
+    description: 'pull: total manifests processed'
 
 runs:
   using: node24

@@ -70,6 +70,12 @@ describe("compile", () => {
     );
   });
 
+  it("rejects a multi-key alias object instead of dropping extras", () => {
+    expect(() =>
+      compile(manifest({ secrets: [{ path: "/a", keys: [{ A: "X", B: "Y" }] }] }))
+    ).toThrowError(ManifestError);
+  });
+
   it("resolves a profile's secrets and fetch mode", () => {
     const compiled = compile(
       manifest({

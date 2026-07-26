@@ -17,7 +17,7 @@ const USAGE = `infisicml — declarative Infisical secret manifests
 
 Usage:
   infisicml pull     [ids...] [--env ENV] [--profile NAME]
-  infisicml validate [ids...] [--env ENV] [--against-vault] [--check-values]
+  infisicml validate [ids...] [--env ENV] [--profile NAME] [--against-vault] [--check-values]
   infisicml diff     [ids...] --base REF [--env ENV] [--profile NAME] [--exit-zero]
   infisicml migrate  --project SLUG [--write]
   infisicml list
@@ -81,6 +81,7 @@ async function validate(args: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       env: { type: "string" },
+      profile: { type: "string" },
       "against-vault": { type: "boolean", default: false },
       "check-values": { type: "boolean", default: false },
     },
@@ -94,6 +95,7 @@ async function validate(args: string[]): Promise<void> {
   const results = await validateAll({
     root: process.cwd(),
     environment: values.env,
+    profile: values.profile,
     provider,
     checkValues: values["check-values"],
     ids: positionals,

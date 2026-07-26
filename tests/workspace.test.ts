@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { discoverManifests, loadManifest } from "../src/adapters/workspace.js";
+import {
+  discoverManifests,
+  filterManifests,
+  loadManifest,
+  type ManifestFile,
+} from "../src/adapters/workspace.js";
 
 let root: string;
 
@@ -41,5 +46,26 @@ describe("discoverManifests", () => {
     write("secrets.yaml", VALID);
     const [file] = discoverManifests(root);
     expect(loadManifest(file!).project).toBe("demo");
+  });
+});
+
+describe("filterManifests", () => {
+  const files = [
+    { id: ".", dir: "/", path: "/secrets.yaml", filename: "secrets.yaml" },
+    { id: "apps/api", dir: "/apps/api", path: "/apps/api/secrets.yaml", filename: "secrets.yaml" },
+  ] satisfies ManifestFile[];
+
+  it("returns all when no ids are given", () => {
+    expect(filterManifests(files)).toHaveLength(2);
+  });
+
+  it("filters to the requested ids", () => {
+    expect(filterManifests(files, ["apps/api"]).map((f) => f.id)).toEqual([
+      "apps/api",
+    ]);
+  });
+
+  it("throws on an unknown id", () => {
+    expect(() => filterManifests(files, ["nope"])).toThrow(/Unknown manifest id/);
   });
 });

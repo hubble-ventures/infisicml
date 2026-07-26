@@ -66,6 +66,23 @@ function walk(root: string, dir: string, out: ManifestFile[]): void {
   }
 }
 
+/**
+ * Restrict `files` to the requested ids, throwing on an unknown id so every
+ * command reports a typo the same way (rather than silently doing nothing).
+ */
+export function filterManifests(
+  files: ManifestFile[],
+  ids?: string[]
+): ManifestFile[] {
+  if (!ids || ids.length === 0) return files;
+  const missing = ids.filter((id) => !files.some((f) => f.id === id));
+  if (missing.length > 0) {
+    throw new Error(`Unknown manifest id(s): ${missing.join(", ")}`);
+  }
+  const wanted = new Set(ids);
+  return files.filter((f) => wanted.has(f.id));
+}
+
 /** Read the raw (unvalidated) manifest object — for `validateStructure`. */
 export function readManifestRaw(file: ManifestFile): unknown {
   return parseYamlText(readFileSync(file.path, "utf8"));
@@ -85,17 +102,23 @@ export function readManifestAtRef(
   ref: string,
   repoRelativePath: string
 ): unknown | null {
+  let text: string;
   try {
-    const text = execFileSync("git", ["show", `${ref}:${repoRelativePath}`], {
+    text = execFileSync("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    return parseYamlText(text);
   } catch {
+    // The file didn't exist at that ref (or the ref is unknown) — treat as
+    // absent. A malformed YAML at the ref must NOT be masked as "absent", so
+    // parse outside this catch and let a parse error propagate.
     return null;
   }
+  return parseYamlText(text);
 }
 
+// Secret output files are written owner-only (0600) — they hold vault values.
+// The mode applies on creation; an existing file keeps its permissions.
 export function writeOutput(path: string, content: string): void {
-  writeFileSync(path, content);
+  writeFileSync(path, content, { mode: 0o600 });
 }

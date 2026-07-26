@@ -64,9 +64,11 @@ export function readEntry(entry: KeyEntry): {
   targetVar: string;
 } {
   if (typeof entry === "string") return { sourceKey: entry, targetVar: entry };
-  const pair = Object.entries(entry)[0];
-  if (!pair) throw new ManifestError([aliasError()]);
-  const [sourceKey, targetVar] = pair;
+  // The schema already enforces exactly one pair; guard anyway so a hand-built
+  // manifest (or a future schema slip) can never silently drop extra aliases.
+  const pairs = Object.entries(entry);
+  if (pairs.length !== 1) throw new ManifestError([aliasError()]);
+  const [sourceKey, targetVar] = pairs[0] as [string, string];
   return { sourceKey, targetVar };
 }
 
