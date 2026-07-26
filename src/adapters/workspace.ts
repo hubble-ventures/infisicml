@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   existsSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -123,22 +125,36 @@ export function readManifestAtRef(
   return parseYamlText(text);
 }
 
-/** Whether `ref` resolves to a commit — used to reject a bad `--base` up front. */
-export function refExists(ref: string): boolean {
+/**
+ * Resolve `ref` to a fixed commit SHA, or `null` if it doesn't resolve. Diffing
+ * pins the base to this SHA once so every manifest is read from the same tree,
+ * even if the branch moves mid-run.
+ */
+export function resolveRef(ref: string): string | null {
   try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return true;
+    return execFileSync(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
   } catch {
-    return false;
+    return null;
   }
 }
 
-// Secret output files are written owner-only (0600) — they hold vault values.
-// writeFileSync's `mode` only applies on creation, so chmod as well to tighten
-// an already-existing (possibly world-readable) file.
+/**
+ * Write a secret output file atomically and owner-only. Content goes to a fresh
+ * temp file created at 0600, then renamed over the destination — so the secret
+ * is never momentarily visible at a looser mode (which a plain overwrite +
+ * chmod would allow), and a partial write never replaces a good file.
+ */
 export function writeOutput(path: string, content: string): void {
-  writeFileSync(path, content, { mode: 0o600 });
-  chmodSync(path, 0o600);
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, content, { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
 }

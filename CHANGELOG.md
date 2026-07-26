@@ -6,15 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [3.0.1] - 2026-07-26
 
-Follow-up hardening from post-merge review of #12. No behavior change to the
-happy path; the manifest format, CLI, and Action interface are unchanged.
+Follow-up hardening from post-merge review of #12. The manifest format and CLI
+are unchanged; the Action **output** interface changed (the `packages` output
+was renamed — see below).
 
 ### Fixed
 
-- **diff** now rejects an unknown `--base` ref up front instead of silently
-  reporting every manifest as newly added.
-- **pull** tightens an already-existing output file to `0600` (not only on
-  creation), so a previously world-readable `.env.secrets` is locked down.
+- **diff** resolves `--base` to a fixed commit once — rejecting an unknown ref
+  up front (instead of reporting every manifest as newly added) and pinning all
+  reads to one tree even if the branch moves mid-run.
+- **pull** writes secret files atomically (temp file at `0600` → rename), so a
+  previously world-readable `.env.secrets` is never briefly exposed at a looser
+  mode and a partial write can't replace a good file.
 - **migrate** dry-run wording no longer claims it "wrote" a file it didn't;
   the message reflects the mode.
 
