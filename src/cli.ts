@@ -185,6 +185,11 @@ function migrate(args: string[]): void {
   }
 
   for (const report of reports) {
+    if (report.failed) {
+      console.error(`❌ ${report.id}/${report.source}: ${report.warnings.join("; ")}`);
+      process.exitCode = 1;
+      continue;
+    }
     if (report.skipped) {
       console.log(`⏭️  ${report.id}/${report.source}: already v3 — skipped`);
       continue;

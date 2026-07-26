@@ -81,12 +81,12 @@ describe("InfisicalProvider", () => {
     ]);
 
     expect(out).toEqual({ API_KEY: "v" });
-    // One request per requested key, never a whole-folder read.
-    const paths = server.requests.map((r) => r.pathname);
-    expect(paths).toEqual([
-      "/api/v3/secrets/raw/API_KEY",
-      "/api/v3/secrets/raw/ABSENT",
-    ]);
+    // One request per requested key, never a whole-folder read. The per-key
+    // reads are concurrent (Promise.all), so compare order-independently.
+    const paths = server.requests.map((r) => r.pathname).sort();
+    expect(paths).toEqual(
+      ["/api/v3/secrets/raw/API_KEY", "/api/v3/secrets/raw/ABSENT"].sort()
+    );
   });
 
   it("throws on a non-OK response", async () => {

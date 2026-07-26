@@ -38,9 +38,10 @@ list:
 - **validate** checks the bindings — structurally, then against the live vault.
 - **diff** set-diffs two binding lists.
 
-`validate` and `diff` operate on _declarations only_ — they never read secret
-values, so they're fast, offline-capable, and safe to run on untrusted PR
-branches.
+`diff` and tier-1 `validate` operate on _declarations only_ — no vault access at
+all — so they're fast, offline, and safe to run on untrusted PR branches. The
+vault tiers (`--against-vault`, `--check-values`) query Infisical and should run
+in a trusted context.
 
 ## The three capabilities
 

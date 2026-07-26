@@ -33,13 +33,13 @@ export function migrateV2(
     warnings.push("Manifest already declares version: 1 — looks like v3 already.");
   }
 
-  const secrets = flattenTree(v2.secrets);
+  const secrets = flattenTree(v2.secrets, warnings, "secrets");
 
   const defaults: Record<string, unknown> = {};
   if (typeof v2.output === "string") defaults.output = v2.output;
   if (v2.fetch === "folder" || v2.fetch === "keys") defaults.fetch = v2.fetch;
 
-  const profiles = mapProfiles(v2.profiles);
+  const profiles = mapProfiles(v2.profiles, warnings);
   const environments = mapEnvironments(v2.environments, warnings);
 
   if (isRecord(v2.ci)) {
@@ -64,13 +64,26 @@ export function migrateV2(
   return { manifest: manifestSchema.parse(candidate), warnings };
 }
 
-function flattenTree(tree: unknown): SecretsBlock[] {
-  if (!Array.isArray(tree)) return [];
+// Anything that doesn't fit the v2 grammar is skipped but recorded, so a
+// malformed source can never silently lose bindings on `--write` — the dropped
+// paths surface as warnings the operator reviews (dry-run is the default).
+function flattenTree(
+  tree: unknown,
+  warnings: string[],
+  label: string
+): SecretsBlock[] {
+  if (!Array.isArray(tree)) {
+    warnings.push(`\`${label}\` is not a list — nothing migrated from it.`);
+    return [];
+  }
   const blocks: SecretsBlock[] = [];
   for (const folderObj of tree) {
-    if (!isRecord(folderObj)) continue;
+    if (!isRecord(folderObj)) {
+      warnings.push(`Skipped a non-folder entry in \`${label}\`.`);
+      continue;
+    }
     for (const [name, contents] of Object.entries(folderObj)) {
-      walkFolder(name, contents, blocks);
+      walkFolder(name, contents, blocks, warnings);
     }
   }
   return blocks;
@@ -81,9 +94,13 @@ function flattenTree(tree: unknown): SecretsBlock[] {
 function walkFolder(
   pathSoFar: string,
   contents: unknown,
-  blocks: SecretsBlock[]
+  blocks: SecretsBlock[],
+  warnings: string[]
 ): void {
-  if (!Array.isArray(contents)) return;
+  if (!Array.isArray(contents)) {
+    warnings.push(`Skipped folder '${pathSoFar}' — its contents is not a list.`);
+    return;
+  }
   const keys: KeyEntry[] = [];
   const subfolders: Array<[string, unknown]> = [];
   for (const entry of contents) {
@@ -91,24 +108,30 @@ function walkFolder(
       keys.push(entry);
       continue;
     }
-    if (!isRecord(entry)) continue;
+    if (!isRecord(entry)) {
+      warnings.push(`Skipped an unsupported entry in '${pathSoFar}'.`);
+      continue;
+    }
     for (const [key, value] of Object.entries(entry)) {
       if (Array.isArray(value)) {
         subfolders.push([`${pathSoFar}/${key}`, value]);
       } else if (typeof value === "string") {
         // A single-pair alias; a multi-alias v2 object becomes several entries.
         keys.push({ [key]: value });
+      } else {
+        warnings.push(`Skipped '${pathSoFar}:${key}' — unsupported value.`);
       }
     }
   }
   if (keys.length > 0) blocks.push({ path: normalizePath(pathSoFar), keys });
   for (const [subPath, subContents] of subfolders) {
-    walkFolder(subPath, subContents, blocks);
+    walkFolder(subPath, subContents, blocks, warnings);
   }
 }
 
 function mapProfiles(
-  profiles: unknown
+  profiles: unknown,
+  warnings: string[]
 ): Record<string, { secrets: SecretsBlock[]; fetch?: "folder" | "keys" }> | undefined {
   if (!isRecord(profiles)) return undefined;
   const out: Record<
@@ -116,10 +139,13 @@ function mapProfiles(
     { secrets: SecretsBlock[]; fetch?: "folder" | "keys" }
   > = {};
   for (const [name, config] of Object.entries(profiles)) {
-    if (!isRecord(config)) continue;
+    if (!isRecord(config)) {
+      warnings.push(`Skipped profile '${name}' — not an object.`);
+      continue;
+    }
     const fetch = config.fetch;
     out[name] = {
-      secrets: flattenTree(config.secrets),
+      secrets: flattenTree(config.secrets, warnings, `profiles.${name}.secrets`),
       ...(fetch === "folder" || fetch === "keys" ? { fetch } : {}),
     };
   }

@@ -63,6 +63,23 @@ describe("exportSecrets", () => {
     const env = readFileSync(process.env.GITHUB_ENV as string, "utf8");
     expect(env).toMatch(/^API_KEY<<ghadelimiter_.+\ns3cr3t\nghadelimiter_.+\n$/);
   });
+
+  it("preserves a multiline value with delimiter-like content", () => {
+    const spy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    // A value spanning lines and mentioning the heredoc marker must survive
+    // intact (the random per-write delimiter never collides with content).
+    const value = "-----BEGIN KEY-----\nghadelimiter_fake\nline3\n-----END KEY-----";
+    exportSecrets({ PRIVATE_KEY: value });
+    spy.mockRestore();
+
+    const env = readFileSync(process.env.GITHUB_ENV as string, "utf8");
+    const match = env.match(/^PRIVATE_KEY<<(ghadelimiter_\S+)\n([\s\S]*)\n\1\n$/);
+    expect(match).not.toBeNull();
+    expect(match?.[2]).toBe(value);
+    expect(value.includes(match?.[1] as string)).toBe(false);
+  });
 });
 
 describe("setOutput / appendSummary", () => {

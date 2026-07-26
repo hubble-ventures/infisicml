@@ -38,6 +38,8 @@ export type MigrationReport = {
   wrote?: string;
   /** True when the source already looked like v3 and was skipped. */
   skipped?: boolean;
+  /** True when the source could not be parsed/migrated (reported, not fatal). */
+  failed?: boolean;
 };
 
 /** Migrate every v2 manifest found under `root` to v3. */
@@ -47,28 +49,41 @@ export function migrateAll(options: MigrateOptions): MigrationReport[] {
 
   const reports: MigrationReport[] = [];
   for (const file of files) {
-    const raw = parseYamlText(readFileSync(file.path, "utf8"));
-    if (isRecord(raw) && raw.version === 1) {
-      reports.push({ id: file.id, source: file.source, yaml: "", warnings: [], skipped: true });
-      continue;
-    }
+    // Isolate per file: one unparsable legacy manifest must not abort the sweep.
+    try {
+      const raw = parseYamlText(readFileSync(file.path, "utf8"));
+      if (isRecord(raw) && raw.version === 1) {
+        reports.push({ id: file.id, source: file.source, yaml: "", warnings: [], skipped: true });
+        continue;
+      }
 
-    const { manifest, warnings } = migrateV2(raw, { project: options.project });
-    const yaml = renderYaml(manifest);
+      const { manifest, warnings } = migrateV2(raw, { project: options.project });
+      const yaml = renderYaml(manifest);
 
-    const report: MigrationReport = { id: file.id, source: file.source, yaml, warnings };
-    if (basename(file.source) !== "secrets.yaml") {
-      report.warnings = [
-        ...warnings,
-        `Wrote secrets.yaml; the old ${file.source} is now stale — remove it.`,
-      ];
+      const report: MigrationReport = { id: file.id, source: file.source, yaml, warnings };
+      if (basename(file.source) !== "secrets.yaml") {
+        report.warnings = [
+          ...warnings,
+          `Wrote secrets.yaml; the old ${file.source} is now stale — remove it.`,
+        ];
+      }
+      if (options.write) {
+        const target = join(file.dir, "secrets.yaml");
+        writeFileSync(target, yaml, { mode: 0o600 });
+        report.wrote = target;
+      }
+      reports.push(report);
+    } catch (error) {
+      reports.push({
+        id: file.id,
+        source: file.source,
+        yaml: "",
+        warnings: [
+          `Failed to migrate ${file.source}: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+        failed: true,
+      });
     }
-    if (options.write) {
-      const target = join(file.dir, "secrets.yaml");
-      writeFileSync(target, yaml);
-      report.wrote = target;
-    }
-    reports.push(report);
   }
   return reports;
 }
@@ -91,6 +106,11 @@ function walk(
         path: join(dir, name),
         dir,
       });
+      // One manifest per directory. Otherwise a dir holding both an
+      // already-migrated secrets.yaml and a stale secrets.yml/.json would
+      // produce two entries, and migrating the stale one with --write would
+      // clobber the v3 file (all writes target secrets.yaml).
+      break;
     }
   }
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
