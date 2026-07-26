@@ -115,6 +115,9 @@ export function readManifestAtRef(
     text = execFileSync("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      // Pin the locale so the stderr matched below is always English, not a
+      // translated message under the operator's locale.
+      env: { ...process.env, LC_ALL: "C", LANG: "C" },
     });
   } catch (error) {
     // Return null ONLY when git proves the path is absent at this (already

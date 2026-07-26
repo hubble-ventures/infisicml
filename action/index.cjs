@@ -22573,7 +22573,10 @@ function readManifestAtRef(ref, repoRelativePath) {
   try {
     text = (0, import_node_child_process.execFileSync)("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      // Pin the locale so the stderr matched below is always English, not a
+      // translated message under the operator's locale.
+      env: { ...process.env, LC_ALL: "C", LANG: "C" }
     });
   } catch (error51) {
     const stderr = String(error51.stderr ?? "");
