@@ -32,6 +32,10 @@ jobs:
       # build step). Fail if either drifted from source.
       - name: Verify committed action bundle + schema are up to date
         run: |
+          # Assert the generated files are tracked (a plain `git diff` ignores
+          # an untracked file, so it can't catch one that was never committed).
+          git ls-files --error-unmatch action/index.cjs schema/secrets.schema.json >/dev/null \
+            || { echo "::error::action/index.cjs or schema/secrets.schema.json is not committed"; exit 1; }
           if ! git diff --exit-code -- action/index.cjs schema; then
             echo "::error::action/index.cjs or schema/ is stale — run 'pnpm build' and commit the result"
             exit 1

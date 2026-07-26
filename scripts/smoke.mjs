@@ -70,6 +70,13 @@ try {
   writeFileSync(join(dir, "secrets.yaml"), BASE);
   assert(cli("diff", "--base", "HEAD").code === 0, "diff is clean when unchanged");
 
+  // An invalid base ref is rejected, not treated as an all-new diff.
+  const badBase = cli("diff", "--base", "no-such-ref-xyz");
+  assert(
+    badBase.code === 1 && /Unknown base ref/.test(badBase.out),
+    "diff rejects an unknown base ref"
+  );
+
   console.log("\nSmoke passed.");
 } finally {
   rmSync(dir, { recursive: true, force: true });

@@ -4,6 +4,31 @@ All notable changes to `infisicml` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-07-26
+
+Follow-up hardening from post-merge review of #12. No behavior change to the
+happy path; the manifest format, CLI, and Action interface are unchanged.
+
+### Fixed
+
+- **diff** now rejects an unknown `--base` ref up front instead of silently
+  reporting every manifest as newly added.
+- **pull** tightens an already-existing output file to `0600` (not only on
+  creation), so a previously world-readable `.env.secrets` is locked down.
+- **migrate** dry-run wording no longer claims it "wrote" a file it didn't;
+  the message reflects the mode.
+
+### Changed
+
+- Renamed the Action's `packages` output to **`manifests`** for naming
+  consistency (the v2 `package-id` vocabulary is gone). ⚠️ If you consumed the
+  `packages` output, update to `manifests`.
+- CI/release drift gate also asserts `action/index.cjs` and the JSON schema are
+  **tracked**, not just diff-clean (a plain `git diff` ignores an untracked
+  file).
+- `persist-credentials: false` on the release guard checkout (it never pushes).
+- README: install snippet shows separate npm/pnpm/yarn commands.
+
 ## [3.0.0] - 2026-07-26
 
 Complete rewrite around a pure functional core and three first-class

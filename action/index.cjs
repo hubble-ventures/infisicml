@@ -22579,9 +22579,22 @@ function readManifestAtRef(ref, repoRelativePath) {
   }
   return parseYamlText(text);
 }
+function refExists(ref) {
+  try {
+    (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      stdio: ["ignore", "ignore", "ignore"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // src/commands/diff.ts
 function diffAll(options) {
+  if (!refExists(options.base)) {
+    throw new Error(`Unknown base ref: ${options.base}`);
+  }
   const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
@@ -22674,7 +22687,7 @@ async function runPull(opts) {
     total += Object.keys(values).length;
     core.info(`Loaded ${Object.keys(values).length} vars from ${file2.id}`);
   }
-  core.setOutput("packages", resolved.length);
+  core.setOutput("manifests", resolved.length);
   core.setOutput("count", total);
   core.info(`Exported ${total} secret(s) from ${resolved.length} manifest(s).`);
 }

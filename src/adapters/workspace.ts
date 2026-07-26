@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative, sep } from "node:path";
 import { type Manifest, parseManifest, parseYamlText } from "../core/index.js";
 
@@ -109,16 +115,30 @@ export function readManifestAtRef(
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
-    // The file didn't exist at that ref (or the ref is unknown) — treat as
-    // absent. A malformed YAML at the ref must NOT be masked as "absent", so
-    // parse outside this catch and let a parse error propagate.
+    // The file didn't exist at this (already-validated) ref — treat as absent.
+    // A malformed YAML at the ref must NOT be masked as "absent", so parse
+    // outside this catch and let a parse error propagate.
     return null;
   }
   return parseYamlText(text);
 }
 
+/** Whether `ref` resolves to a commit — used to reject a bad `--base` up front. */
+export function refExists(ref: string): boolean {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Secret output files are written owner-only (0600) — they hold vault values.
-// The mode applies on creation; an existing file keeps its permissions.
+// writeFileSync's `mode` only applies on creation, so chmod as well to tighten
+// an already-existing (possibly world-readable) file.
 export function writeOutput(path: string, content: string): void {
   writeFileSync(path, content, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }

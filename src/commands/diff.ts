@@ -13,6 +13,7 @@ import {
   loadManifest,
   type ManifestFile,
   readManifestAtRef,
+  refExists,
 } from "../adapters/workspace.js";
 
 export type DiffOptions = {
@@ -40,6 +41,11 @@ export type ManifestDiff = {
  * covers additions and modifications, the security-relevant PR review surface.
  */
 export function diffAll(options: DiffOptions): ManifestDiff[] {
+  // Reject a bad `--base` up front — otherwise every read at the ref fails and
+  // each manifest is silently reported as newly added.
+  if (!refExists(options.base)) {
+    throw new Error(`Unknown base ref: ${options.base}`);
+  }
   const files = filterManifests(discoverManifests(options.root), options.ids);
   const compileOpts = {
     environment: options.environment,
