@@ -4,6 +4,70 @@ All notable changes to `infisicml` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-26
+
+Complete rewrite around a pure functional core and three first-class
+capabilities: **pull**, **validate**, and **diff**. This is a breaking release —
+the manifest format, the CLI, and the GitHub Action all changed.
+
+### Added
+
+- **`diff` — secret-surface diffing for PRs.** `infisicml diff --base <ref>`
+  computes the structural delta (added / removed variables, moved sources)
+  between the working tree and a git ref, and exits non-zero when anything
+  changed. The Action posts it as a sticky PR comment and job summary. It reads
+  **declarations only** — never secret values — so it's safe on untrusted
+  branches.
+- **Tiered `validate`.** Tier 1 is schema + structure (offline), including a
+  **duplicate-target-variable** check a plain schema misses. `--against-vault`
+  adds tier 2 (every declared key exists in the vault; undeclared keys reported
+  as drift). `--check-values` adds tier 3 (present-but-empty required keys).
+- **Native JS GitHub Action** (`runs.using: node24`) with a single committed
+  bundle — masks every value before it reaches `$GITHUB_ENV`, sets step outputs,
+  writes the job summary, and upserts a PR comment. One `command:` input selects
+  `pull` / `validate` / `diff`.
+- **Published JSON Schema**, generated from the Zod schema so the two can never
+  drift, for editor autocomplete.
+
+### Changed
+
+- **New manifest format (`version: 1`).** Flat, diff-friendly `secrets: [{ path,
+  keys }]` blocks replace the nested folder tree; `keys` are bare names or
+  single-pair `{ SOURCE: TARGET }` aliases. `project` now lives in the manifest.
+- **Convention-based discovery.** Packages are found by walking for
+  `secrets.yaml` / `secrets.yml`; the separate `infisicml.config` registry is
+  gone. Two manifest files in one directory remains a hard error.
+- **OIDC-only auth** for the Action, via an Infisical machine identity. No
+  long-lived credential in the repo.
+- **Toolchain:** ESM-only, `engines: node >= 22` (the two current LTS lines, 22
+  and 24). Zod 4 (native JSON-Schema generation), TypeScript 7, Vitest 4, tsup.
+  pnpm for development; the published package stays manager-agnostic (CI proves
+  install under npm / pnpm / yarn).
+
+### Removed
+
+- The `export-gha`, `list`, `paths`, and `run` subcommands, the
+  `infisicml.config.{ts,js,json}` registry, JSON manifests as a first-class
+  format, and the CI-stub/skip machinery. The composite (npx) Action is replaced
+  by the bundled JS Action.
+
+### Migration
+
+Run the built-in codemod to convert v2 manifests in place:
+
+```bash
+infisicml migrate --project <slug>          # dry run — preview the v3 YAML
+infisicml migrate --project <slug> --write   # apply
+```
+
+It flattens the v2 folder tree into `{ path, keys }` blocks, preserves aliases,
+moves `output`/`fetch` under `defaults`, renames `optionalKeys` → `optional`, and
+validates the result against the v3 schema before writing. The `project` slug is
+supplied on the command line because v2 manifests didn't carry it (it lived in
+`infisicml.config` / the action inputs). The `ci` block has no v3 equivalent and
+is dropped with a warning. Finally, switch workflows to `command: pull` with
+`identity-id`.
+
 ## [2.1.0] - 2026-07-18
 
 ### Added

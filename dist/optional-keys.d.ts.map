@@ -1,1 +1,0 @@
-{"version":3,"file":"optional-keys.d.ts","sourceRoot":"","sources":["../src/optional-keys.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,eAAe,CAAC;AAErD,wBAAgB,mBAAmB,CACjC,QAAQ,EAAE,eAAe,EACzB,OAAO,EAAE,MAAM,GACd,MAAM,EAAE,CAEV;AAED,wBAAgB,sBAAsB,CACpC,MAAM,EAAE,MAAM,CAAC,MAAM,EAAE,MAAM,CAAC,EAC9B,YAAY,EAAE,MAAM,EAAE,GACrB,IAAI,CAQN"}

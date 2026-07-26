@@ -1,26 +1,67 @@
-import { loadConfig } from "../config.js";
-import { secretsManifestSchema } from "../manifest.js";
-import { discoverManifests } from "../registry.js";
+import {
+  compile,
+  type Issue,
+  type SecretsProvider,
+  validateAgainstVault,
+  validateStructure,
+} from "../core/index.js";
+import {
+  discoverManifests,
+  filterManifests,
+  loadManifest,
+  type ManifestFile,
+  readManifestRaw,
+} from "../adapters/workspace.js";
 
-export async function runValidate(cwd?: string): Promise<void> {
-  const config = await loadConfig(cwd);
-  const manifests = discoverManifests(config);
-  let errors = 0;
+export type ValidateOptions = {
+  root: string;
+  environment?: string;
+  /** Profile to resolve for the vault tiers (matches pull/diff). */
+  profile?: string;
+  /** When set, also run tiers 2/3 against the vault. */
+  provider?: SecretsProvider;
+  /** Tier 3 — flag present-but-empty required keys. Implies a value read. */
+  checkValues?: boolean;
+  ids?: string[];
+};
 
-  for (const { id, config: m, file } of manifests) {
-    const result = secretsManifestSchema.safeParse(m);
-    if (!result.success) {
-      console.error(`❌ ${id} (${file.path}):`);
-      for (const issue of result.error.issues) {
-        console.error(`   ${issue.path.join(".")}: ${issue.message}`);
-      }
-      errors += 1;
+export type ManifestValidation = {
+  file: ManifestFile;
+  issues: Issue[];
+};
+
+/**
+ * Validate every selected manifest. Always runs tier 1 (schema + structure);
+ * when a provider is supplied, also runs tiers 2/3 against the vault. A manifest
+ * that fails tier 1 is not checked against the vault (its compile would throw).
+ */
+export async function validateAll(
+  options: ValidateOptions
+): Promise<ManifestValidation[]> {
+  const files = filterManifests(discoverManifests(options.root), options.ids);
+  const results: ManifestValidation[] = [];
+
+  for (const file of files) {
+    const raw = readManifestRaw(file);
+    const issues = validateStructure(raw);
+
+    if (issues.length === 0 && options.provider) {
+      // Safe to load + compile now — tier 1 passed, so neither throws.
+      const compiled = compile(loadManifest(file), {
+        environment: options.environment,
+        profile: options.profile,
+      });
+      issues.push(
+        ...(await validateAgainstVault(compiled, options.provider, {
+          checkValues: options.checkValues,
+        }))
+      );
     }
+    results.push({ file, issues });
   }
+  return results;
+}
 
-  if (errors > 0) {
-    throw new Error(`validate failed: ${errors} invalid manifest(s)`);
-  }
-
-  console.log(`✅ ${manifests.length} manifest(s) valid`);
+export function hasErrors(results: ManifestValidation[]): boolean {
+  return results.some((r) => r.issues.some((i) => i.level === "error"));
 }

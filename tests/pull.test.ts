@@ -1,332 +1,117 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseDotenv } from "../src/dotenv.js";
-import type { PackageManifest } from "../src/registry.js";
-import type { SecretsProvider } from "../src/providers/types.js";
-import { pullManifest } from "../src/pull.js";
+import { InfisicalProvider } from "../src/adapters/infisical.js";
+import { pullToFiles } from "../src/commands/pull.js";
+import { json, type MockServer, startMockServer } from "./http.js";
 
-/** Fake provider: returns a fixed value per secret key, regardless of folder. */
-function fakeProvider(secrets: Record<string, string>): SecretsProvider {
-  return {
-    async exportFolder() {
-      return { ...secrets };
-    },
-    async exportKeys(_env, _folder, keys) {
-      const out: Record<string, string> = {};
-      for (const key of keys) {
-        if (key in secrets) out[key] = secrets[key];
-      }
-      return out;
-    },
-  };
+let dir: string;
+let server: MockServer;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "infisicml-pull-"));
+});
+afterEach(async () => {
+  await server?.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function write(rel: string, body: string): void {
+  const path = join(dir, rel);
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, body);
 }
 
-/**
- * Recording provider for `fetch: "keys"` assertions: like {@link fakeProvider}
- * but tracks which keys were requested and whether a whole-folder read happened.
- */
-function recordingProvider(secrets: Record<string, string>) {
-  const requestedKeys: string[] = [];
-  let folderReads = 0;
-  const provider: SecretsProvider = {
-    async exportFolder() {
-      folderReads += 1;
-      return { ...secrets };
-    },
-    async exportKeys(_env, _folder, keys) {
-      requestedKeys.push(...keys);
-      const out: Record<string, string> = {};
-      for (const key of keys) {
-        if (key in secrets) out[key] = secrets[key];
-      }
-      return out;
-    },
-  };
-  return {
-    provider,
-    requestedKeys,
-    get folderReads() {
-      return folderReads;
-    },
-  };
-}
-
-describe("pullManifest — output paths + multi-target aliases", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "infisicml-pull-"));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  function manifest(config: PackageManifest["config"]): PackageManifest {
-    return {
-      id: "web",
-      dir,
-      config,
-      file: {
-        path: join(dir, "secrets.yaml"),
-        filename: "secrets.yaml",
-        format: "yaml",
-      },
-    };
-  }
-
-  it("writes the default .env.secrets when no output is set", async () => {
-    const result = await pullManifest({
-      manifest: manifest({ secrets: [{ clerk: ["CLERK_PUBLISHABLE_KEY"] }] }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({ CLERK_PUBLISHABLE_KEY: "pk_live" }),
-    });
-    expect(result).toBe("pulled");
-    expect(existsSync(join(dir, ".env.secrets"))).toBe(true);
-  });
-
-  it("writes to a custom per-package output filename", async () => {
-    await pullManifest({
-      manifest: manifest({
-        secrets: [{ clerk: ["CLERK_PUBLISHABLE_KEY"] }],
-        output: ".env.local",
-      }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({ CLERK_PUBLISHABLE_KEY: "pk_live" }),
-    });
-
-    expect(existsSync(join(dir, ".env.local"))).toBe(true);
-    expect(existsSync(join(dir, ".env.secrets"))).toBe(false);
-
-    const parsed = parseDotenv(readFileSync(join(dir, ".env.local"), "utf8"));
-    expect(parsed.CLERK_PUBLISHABLE_KEY).toBe("pk_live");
-  });
-
-  it("supports `output: .env` (no separators, dotfile) for an app package", async () => {
-    await pullManifest({
-      manifest: manifest({
-        secrets: [{ clerk: ["CLERK_PUBLISHABLE_KEY"] }],
-        output: ".env",
-      }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({ CLERK_PUBLISHABLE_KEY: "pk_live" }),
-    });
-    expect(existsSync(join(dir, ".env"))).toBe(true);
-  });
-
-  it("materializes ONE canonical key to SEVERAL prefixed aliases in one file", async () => {
-    // GOOGLE_MAPS_API_KEY -> both EXPO_PUBLIC_* and VITE_* in a single output.
-    await pullManifest({
-      manifest: manifest({
-        secrets: [
-          {
-            google: [
-              { GOOGLE_MAPS_API_KEY: "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY" },
-              { GOOGLE_MAPS_API_KEY: "VITE_GOOGLE_MAPS_API_KEY" },
-            ],
-          },
-        ],
-        output: ".env",
-      }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({ GOOGLE_MAPS_API_KEY: "AIza-secret" }),
-    });
-
-    const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-    expect(parsed.GOOGLE_MAPS_API_KEY).toBe("AIza-secret");
-    expect(parsed.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY).toBe("AIza-secret");
-    expect(parsed.VITE_GOOGLE_MAPS_API_KEY).toBe("AIza-secret");
-  });
-
-  it("emits only the declared keys from a multi-key folder", async () => {
-    // The /stripe folder holds a server secret and a publishable key; a client
-    // package declares only the publishable key (aliased) — the server secret
-    // is undeclared and must never reach the client build's env.
-    await pullManifest({
-      manifest: manifest({
-        secrets: [
-          { stripe: [{ STRIPE_PUBLISHABLE_KEY: "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY" }] },
-        ],
-        output: ".env",
-      }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({
-        STRIPE_SECRET_KEY: "sk_live",
-        STRIPE_PUBLISHABLE_KEY: "pk_live",
-      }),
-    });
-
-    const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-    // The declared canonical key AND its alias target both emit; the undeclared
-    // server secret does not.
-    expect(parsed).toEqual({
-      STRIPE_PUBLISHABLE_KEY: "pk_live",
-      EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_live",
-    });
-    expect(parsed.STRIPE_SECRET_KEY).toBeUndefined();
-  });
-
-  it("fails the pull when the tree declares a key no folder produced", async () => {
-    await expect(
-      pullManifest({
-        manifest: manifest({
-          secrets: [{ stripe: ["NONEXISTENT_KEY"] }],
-          output: ".env",
-        }),
-        repoRoot: dir,
-        envName: "development",
-        provider: fakeProvider({ STRIPE_SECRET_KEY: "sk_live" }),
-      })
-    ).rejects.toThrow(/NONEXISTENT_KEY/);
-  });
-
-  it("allows a declared key to be absent when it is optional for the env", async () => {
-    // STRIPE_WEBHOOK_SECRET is declared but not present; optionalKeys downgrades
-    // the miss to a notice rather than failing the pull.
-    const result = await pullManifest({
-      manifest: manifest({
-        secrets: [{ stripe: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"] }],
-        output: ".env",
-        environments: { development: { optionalKeys: ["STRIPE_WEBHOOK_SECRET"] } },
-      }),
-      repoRoot: dir,
-      envName: "development",
-      provider: fakeProvider({ STRIPE_PUBLISHABLE_KEY: "pk_live" }),
-    });
-    expect(result).toBe("pulled");
-    const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-    expect(parsed).toEqual({ STRIPE_PUBLISHABLE_KEY: "pk_live" });
-  });
-
-  describe("fetch: keys (wire-level least privilege)", () => {
-    it("requests only the declared keys and never reads whole folders", async () => {
-      const rec = recordingProvider({
-        STRIPE_SECRET_KEY: "sk_live",
-        STRIPE_PUBLISHABLE_KEY: "pk_live",
-      });
-      await pullManifest({
-        manifest: manifest({
-          secrets: [{ stripe: ["STRIPE_PUBLISHABLE_KEY"] }],
-          output: ".env",
-          fetch: "keys",
-        }),
-        repoRoot: dir,
-        envName: "development",
-        provider: rec.provider,
-      });
-
-      const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-      expect(parsed).toEqual({ STRIPE_PUBLISHABLE_KEY: "pk_live" });
-      // The server key was never requested from the vault, not merely filtered.
-      expect(rec.requestedKeys).toEqual(["STRIPE_PUBLISHABLE_KEY"]);
-      expect(rec.requestedKeys).not.toContain("STRIPE_SECRET_KEY");
-      expect(rec.folderReads).toBe(0);
-    });
-
-    it("fetches the canonical aliased source (the real vault key)", async () => {
-      const rec = recordingProvider({
-        STRIPE_PUBLISHABLE_KEY: "pk_live",
-        STRIPE_SECRET_KEY: "sk_live",
-      });
-      await pullManifest({
-        manifest: manifest({
-          secrets: [
-            { stripe: [{ STRIPE_PUBLISHABLE_KEY: "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY" }] },
-          ],
-          output: ".env",
-          fetch: "keys",
-        }),
-        repoRoot: dir,
-        envName: "development",
-        provider: rec.provider,
-      });
-
-      const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-      expect(parsed).toEqual({
-        STRIPE_PUBLISHABLE_KEY: "pk_live",
-        EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_live",
-      });
-      // The aliased map key IS the canonical vault key — requested directly.
-      expect(rec.requestedKeys).toEqual(["STRIPE_PUBLISHABLE_KEY"]);
-      expect(rec.requestedKeys).not.toContain("STRIPE_SECRET_KEY");
-    });
-
-    it("still fails when a declared key exists in no folder", async () => {
-      await expect(
-        pullManifest({
-          manifest: manifest({
-            secrets: [{ stripe: ["NONEXISTENT_KEY"] }],
-            output: ".env",
-            fetch: "keys",
-          }),
-          repoRoot: dir,
-          envName: "development",
-          provider: fakeProvider({ STRIPE_SECRET_KEY: "sk_live" }),
-        })
-      ).rejects.toThrow(/NONEXISTENT_KEY/);
-    });
-  });
-
-  describe("cross-folder provenance (same key name in two folders)", () => {
-    /** Provider that returns a distinct secret set per folder path. */
-    function folderAwareProvider(
-      byFolder: Record<string, Record<string, string>>
-    ): SecretsProvider {
-      return {
-        async exportFolder(_env, folder) {
-          return { ...(byFolder[folder] ?? {}) };
-        },
-        async exportKeys(_env, folder, keys) {
-          const src = byFolder[folder] ?? {};
-          const out: Record<string, string> = {};
-          for (const k of keys) if (k in src) out[k] = src[k];
-          return out;
-        },
-      };
+async function vault(data: Record<string, Record<string, string>>) {
+  return startMockServer(({ url }, res) => {
+    const folder = url.searchParams.get("secretPath") ?? "/";
+    if (url.pathname === "/api/v3/secrets/raw") {
+      const secrets = Object.entries(data[folder] ?? {}).map(
+        ([secretKey, secretValue]) => ({ secretKey, secretValue })
+      );
+      return json(res, 200, { secrets });
     }
+    const match = url.pathname.match(/^\/api\/v3\/secrets\/raw\/(.+)$/);
+    if (match) {
+      const key = decodeURIComponent(match[1] as string);
+      const value = data[folder]?.[key];
+      if (value === undefined) return json(res, 404, {});
+      return json(res, 200, { secret: { secretKey: key, secretValue: value } });
+    }
+    return json(res, 500, {});
+  });
+}
 
-    it("routes each folder's TOKEN value to its OWN alias target", async () => {
-      await pullManifest({
-        manifest: manifest({
-          secrets: [
-            { a: [{ TOKEN: "A_TOKEN" }] },
-            { b: [{ TOKEN: "B_TOKEN" }] },
-          ],
-          output: ".env",
-        }),
-        repoRoot: dir,
-        envName: "development",
-        provider: folderAwareProvider({
-          a: { TOKEN: "a-value" },
-          b: { TOKEN: "b-value" },
-        }),
-      });
+describe("pullToFiles", () => {
+  it("writes an aliased, sorted, headed dotenv file next to the manifest", async () => {
+    write(
+      "secrets.yaml",
+      `version: 1
+project: demo
+secrets:
+  - path: /app
+    keys:
+      - { API_KEY: APP_KEY }
+      - REGION
+`
+    );
+    server = await vault({ "/app": { API_KEY: "secret", REGION: "us", EXTRA: "x" } });
+    const provider = new InfisicalProvider("tok", server.url);
 
-      const parsed = parseDotenv(readFileSync(join(dir, ".env"), "utf8"));
-      // Each alias target carries its own folder's value (not one shared TOKEN).
-      expect(parsed.A_TOKEN).toBe("a-value");
-      expect(parsed.B_TOKEN).toBe("b-value");
-    });
+    const outcomes = await pullToFiles({ root: dir, provider });
 
-    it("fails when a key is missing from ONE declaring folder even if another has it", async () => {
-      await expect(
-        pullManifest({
-          manifest: manifest({
-            secrets: [{ a: ["TOKEN"] }, { b: ["TOKEN"] }],
-            output: ".env",
-          }),
-          repoRoot: dir,
-          envName: "development",
-          provider: folderAwareProvider({ a: {}, b: { TOKEN: "b-value" } }),
-        })
-      ).rejects.toThrow(/TOKEN/);
+    expect(outcomes).toEqual([
+      { id: ".", output: ".env.secrets", path: join(dir, ".env.secrets"), count: 2 },
+    ]);
+    const written = readFileSync(join(dir, ".env.secrets"), "utf8");
+    expect(written).toContain("# Pulled from Infisical");
+    expect(written).toContain("# Environment: development");
+    // Sorted, aliased, and the undeclared EXTRA is not leaked.
+    expect(written.trimEnd().split("\n").slice(-2)).toEqual([
+      "APP_KEY=secret",
+      "REGION=us",
+    ]);
+  });
+
+  it("honors the custom output filename and fetch: keys mode", async () => {
+    write(
+      "apps/api/secrets.yaml",
+      `version: 1
+project: demo
+defaults:
+  output: .env
+  fetch: keys
+secrets:
+  - path: /api
+    keys: [TOKEN]
+`
+    );
+    server = await vault({ "/api": { TOKEN: "t" } });
+    const provider = new InfisicalProvider("tok", server.url);
+
+    const outcomes = await pullToFiles({ root: dir, provider });
+    expect(outcomes[0]).toMatchObject({ id: "apps/api", output: ".env" });
+    expect(readFileSync(join(dir, "apps/api/.env"), "utf8")).toContain("TOKEN=t");
+    // keys mode ⇒ per-key reads, never a whole-folder fetch.
+    expect(server.requests.every((r) => r.pathname.startsWith("/api/v3/secrets/raw/"))).toBe(true);
+  });
+
+  it("fails when a required key is missing from the vault", async () => {
+    write(
+      "secrets.yaml",
+      `version: 1
+project: demo
+secrets:
+  - path: /app
+    keys: [API_KEY, MISSING]
+`
+    );
+    server = await vault({ "/app": { API_KEY: "v" } });
+    const provider = new InfisicalProvider("tok", server.url);
+
+    await expect(pullToFiles({ root: dir, provider })).rejects.toMatchObject({
+      issues: [{ code: "missing_key", key: "MISSING" }],
     });
   });
 });
