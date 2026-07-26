@@ -65,6 +65,8 @@ jobs:
           case "${{ matrix.manager }}" in
             npm)  npm init -y >/dev/null && npm install "$GITHUB_WORKSPACE/$TARBALL" ;;
             pnpm) pnpm init >/dev/null && pnpm add "$GITHUB_WORKSPACE/$TARBALL" ;;
-            yarn) corepack enable && yarn init -y >/dev/null && yarn add "$GITHUB_WORKSPACE/$TARBALL" ;;
+            yarn) corepack enable && yarn init -y >/dev/null \
+              && yarn config set nodeLinker node-modules \
+              && yarn add "$GITHUB_WORKSPACE/$TARBALL" ;;
           esac
           ./node_modules/.bin/infisicml --help | grep -q "infisicml"
