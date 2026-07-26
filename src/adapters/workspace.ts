@@ -114,14 +114,18 @@ export function readManifestAtRef(
   try {
     text = execFileSync("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-  } catch {
-    // The file didn't exist at this (already-validated) ref — treat as absent.
-    // A malformed YAML at the ref must NOT be masked as "absent", so parse
-    // outside this catch and let a parse error propagate.
-    return null;
+  } catch (error) {
+    // Return null ONLY when git proves the path is absent at this (already
+    // resolved) commit — a genuinely new manifest. Any other git failure (I/O,
+    // permissions, a corrupt repo) must propagate, not be misread as "absent".
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+    if (/does not exist in|exists on disk, but not in/i.test(stderr)) return null;
+    throw error;
   }
+  // Parse outside the catch so a malformed YAML at the ref surfaces as an error
+  // rather than being masked as "absent".
   return parseYamlText(text);
 }
 

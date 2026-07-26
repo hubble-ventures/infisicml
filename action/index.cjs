@@ -22573,10 +22573,12 @@ function readManifestAtRef(ref, repoRelativePath) {
   try {
     text = (0, import_node_child_process.execFileSync)("git", ["show", `${ref}:${repoRelativePath}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
+      stdio: ["ignore", "pipe", "pipe"]
     });
-  } catch {
-    return null;
+  } catch (error51) {
+    const stderr = String(error51.stderr ?? "");
+    if (/does not exist in|exists on disk, but not in/i.test(stderr)) return null;
+    throw error51;
   }
   return parseYamlText(text);
 }
