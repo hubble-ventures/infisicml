@@ -88,7 +88,9 @@ changed (use `--exit-zero` for an informational run). Ideal for gating PRs.
 ## Install
 
 ```bash
-pnpm add -D @hubble-ventures/infisicml   # or npm i -D / yarn add -D
+pnpm add -D @hubble-ventures/infisicml
+# or: npm install -D @hubble-ventures/infisicml
+# or: yarn add -D @hubble-ventures/infisicml
 ```
 
 Requires Node ≥ 22 (built and tested on the two most recent LTS lines, 22 and

@@ -57,7 +57,7 @@ async function runPull(opts: Common): Promise<void> {
     total += Object.keys(values).length;
     core.info(`Loaded ${Object.keys(values).length} vars from ${file.id}`);
   }
-  core.setOutput("packages", resolved.length);
+  core.setOutput("manifests", resolved.length);
   core.setOutput("count", total);
   core.info(`Exported ${total} secret(s) from ${resolved.length} manifest(s).`);
 }

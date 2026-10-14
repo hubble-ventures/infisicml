@@ -64,7 +64,7 @@ outputs:
     description: 'diff: total variables whose source changed'
   count:
     description: 'pull: total exported variables'
-  packages:
+  manifests:
     description: 'pull: total manifests processed'
 
 runs:

@@ -55,6 +55,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false # guard only reads; it never pushes
       - id: decide
         env:
           GH_TOKEN: ${{ github.token }}
@@ -134,6 +135,10 @@ jobs:
 
       - name: Verify committed action bundle + schema are up to date
         run: |
+          # Assert the generated files are tracked before publishing (a plain
+          # `git diff` ignores an untracked file that was never committed).
+          git ls-files --error-unmatch action/index.cjs schema/secrets.schema.json >/dev/null \
+            || { echo "::error::action/index.cjs or schema/secrets.schema.json is not committed"; exit 1; }
           if ! git diff --exit-code -- action/index.cjs schema; then
             echo "::error::action/index.cjs or schema/ is stale — run 'pnpm build' and commit the result"
             exit 1

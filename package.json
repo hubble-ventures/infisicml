@@ -1,6 +1,6 @@
 {
   "name": "@hubble-ventures/infisicml",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Declarative Infisical secret manifests for monorepos — pull, validate, and diff per-package secrets, with native GitHub Actions support.",
   "keywords": [
     "infisical",
